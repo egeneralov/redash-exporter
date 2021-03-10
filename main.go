@@ -179,6 +179,14 @@ var (
 		},
 		labels,
 	)
+
+	activeTasksCount = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "redash_active_tasks",
+			Help: "Active tasks count.",
+		},
+		labels,
+	)
 )
 
 func getRedashStatus() (redashStatus, error) {
@@ -247,10 +255,61 @@ func main() {
 			unusedQueryResultsCount.With(label).Set(status.UnusedQueryResultsCount)
 			widgetsCount.With(label).Set(status.WidgetsCount)
 
+			s, e := getRedashTasks()
+			if e != nil {
+				log.Error(e)
+			}
+			//fmt.Printf("%+v\n", s)
+			//fmt.Printf("%+v\n", len(s.Tasks))
+			activeTasksCount.With(label).Set(float64(len(s.Tasks)))
 			time.Sleep(time.Duration(*metricsInterval) * time.Second)
 		}
 	}()
+
+
+
 	http.Handle("/metrics", promhttp.Handler())
 	http.HandleFunc("/", rootHandler)
 	log.Fatal(http.ListenAndServe(*addr, nil))
+}
+
+
+
+func getRedashTasks() (ApiAdminQueriesTasksAnswer, error) {
+	var (
+		jsonBody ApiAdminQueriesTasksAnswer
+		url = *redashScheme + "://" + *redashHost + ":" + *redashPort + "/api/admin/queries/tasks" + "?api_key=" + apiKey
+	)
+	resp, e := http.Get(url)
+	if e != nil {
+		return jsonBody, fmt.Errorf("httpGet error : %v", e)
+	}
+	body, e := ioutil.ReadAll(resp.Body)
+	if e != nil {
+		return jsonBody, fmt.Errorf("io read error : %v", e)
+	}
+	e = json.Unmarshal(body, &jsonBody)
+	if e != nil {
+		return jsonBody, fmt.Errorf("json parse error : %v. Is api key correct?", e)
+	}
+	return jsonBody, nil
+}
+
+//api/admin/queries/tasks
+type ApiAdminQueriesTasksAnswer struct {
+	Tasks []struct {
+		Scheduled    bool    `json:"scheduled,omitempty"`
+		UserID       int     `json:"user_id,omitempty"`
+		TaskID       string  `json:"task_id"`
+		OrgID        int     `json:"org_id,omitempty"`
+		StartTime    float64 `json:"start_time"`
+		Worker       string  `json:"worker"`
+		EnqueueTime  float64 `json:"enqueue_time,omitempty"`
+		Queue        string  `json:"queue"`
+		State        string  `json:"state"`
+		QueryID      string  `json:"query_id,omitempty"`
+		DataSourceID int     `json:"data_source_id,omitempty"`
+		TaskName     string  `json:"task_name"`
+		WorkerPid    int     `json:"worker_pid"`
+	} `json:"tasks"`
 }
