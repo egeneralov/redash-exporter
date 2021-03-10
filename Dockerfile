@@ -1,20 +1,27 @@
-FROM golang:alpine AS builder
+FROM golang:1.15.6
 
-ADD ./ /tmp/redash-exporter/
+RUN apt-get update -q && apt-get install -yq ca-certificates
 
-RUN apk update && \
-    apk add git build-base && \
-    rm -rf /var/cache/apk/* && \
-    mkdir -p "$GOPATH/src/github.com/buidlsville/" && \
-    mv /tmp/redash-exporter "$GOPATH/src/github.com/buidlsville/" && \
-    cd "$GOPATH/src/github.com/buidlsville/redash-exporter" && \
-    GOOS=linux GOARCH=amd64 go build -o redash-exporter && \
-    mv redash-exporter /redash-exporter
+ENV \
+  GO111MODULE=on \
+  CGO_ENABLED=0 \
+  GOOS=linux \
+  GOARCH=amd64
 
-FROM alpine:3.7
+WORKDIR /go/src/github.com/egeneralov/redash-exporter
+ADD go.mod go.sum /go/src/github.com/egeneralov/redash-exporter/
+RUN go mod download -x
 
-RUN apk add --update ca-certificates
+ADD . .
 
-COPY --from=builder /redash-exporter /redash-exporter
+RUN go build -v -installsuffix cgo -ldflags="-w -s" -o /go/bin/redash-exporter .
 
-ENTRYPOINT ["/redash-exporter"]
+
+FROM debian:buster
+
+RUN apt-get update -q && apt-get install -yq ca-certificates
+USER nobody
+ENV PATH='/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+CMD /go/bin/redash-exporter
+
+COPY --from=0 /go/bin /go/bin
